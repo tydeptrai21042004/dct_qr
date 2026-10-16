@@ -1,0 +1,21 @@
+{
+  "protocol_id": "reviewer_strength_all_existing_methods_v1",
+  "host_dir": "data/host",
+  "watermarks": [
+    "data/watermark/wm.png",
+    "data/watermark/Cc.logo.circle.png"
+  ],
+  "seeds": [
+    2026,
+    2027,
+    2028
+  ],
+  "attack_suite": "reviewer_strength",
+  "methods": "all",
+  "output_dir": "results/reviewer",
+  "continue_on_error": true,
+  "resume": true,
+  "strict_clean_proposals": true,
+  "host_limit": null,
+  "attack_limit": null
+}

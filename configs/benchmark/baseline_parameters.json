@@ -1,0 +1,82 @@
+{
+  "dct_dm_qim_chen2001_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dct_stdm_qim_chen2001_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dct_iss_malvar2003_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dct_ca_qim_mao2024_semiblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dct_spread_spectrum_cox1997_nonblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dct_dew_langelaar2001_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dwt_entropy_kumar2021_nonblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dwt_qr_fa_guo2017_keyassisted": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dwt_hessenberg_fwa_gaata2022_keyassisted": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dwt_hessenberg_svd_paper2025_semiblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "hessenberg_nha2023_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dwt_svd_roy2018_semiblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "dwt_wht_svd_kumar2024_semiblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "qwt_qsvd_zhang2022_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "qwt_qsvd_zhang2022_semiblind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  },
+  "iwt_svd_qim_zhu2021_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {}
+  }
+}

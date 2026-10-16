@@ -1,0 +1,17 @@
+{
+  "seed": 2026,
+  "reference_step": null,
+  "pilot_count": 128,
+  "pilot_step": 6.0,
+  "pilot_rho_frac": 0.49,
+  "watermark_size": 64,
+  "sync_quick_accept": 0.72,
+  "translation_radius": 8,
+  "translation_subset": 96,
+  "use_opponent_term": true,
+  "use_adaptive_beta_steps": true,
+  "use_global_coset": true,
+  "use_gain_normalization": true,
+  "use_spatial_icm": true,
+  "use_sync_search": true
+}

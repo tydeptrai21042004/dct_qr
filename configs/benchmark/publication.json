@@ -1,0 +1,21 @@
+{
+  "protocol_id": "publication_corrected_dct_qr_theory_baselines_v1",
+  "host_dir": "data/host",
+  "watermarks": [
+    "data/watermark/wm.png",
+    "data/watermark/Cc.logo.circle.png"
+  ],
+  "seeds": [
+    2026,
+    2027,
+    2028
+  ],
+  "attack_suite": "publication",
+  "methods": "all",
+  "output_dir": "results/theory_baselines",
+  "continue_on_error": true,
+  "resume": true,
+  "strict_clean_proposals": true,
+  "host_limit": null,
+  "attack_limit": null
+}

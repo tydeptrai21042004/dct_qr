@@ -1,0 +1,18 @@
+{
+  "protocol_id": "reviewer_smoke_v1",
+  "host_dir": "data/host",
+  "watermarks": [
+    "data/watermark/wm.png"
+  ],
+  "seeds": [
+    2026
+  ],
+  "attack_suite": "reviewer_strength",
+  "methods": "dct_qr_theory",
+  "output_dir": "results/reviewer",
+  "continue_on_error": true,
+  "resume": true,
+  "strict_clean_proposals": true,
+  "host_limit": 1,
+  "attack_limit": 2
+}
