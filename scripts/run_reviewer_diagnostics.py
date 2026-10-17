@@ -12,6 +12,7 @@ import csv
 import hashlib
 import itertools
 import json
+import os
 import platform
 import sys
 import time
@@ -81,13 +82,67 @@ def summary_metadata(args):
             'comparison_note':'Scientific configuration ablation/controls; this is not a new proposed method'}
 
 
+class DiagnosticJournal:
+    """Atomic per-combination cache so a killed Kaggle session loses at most
+    the active image/method/parameter combination, never an entire grid.
+    Changing experiment or code inputs rejects the prior journal.
+    """
+    def __init__(self, args, hosts, watermarks, attacks):
+        source={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted((ROOT/'src'/'qr64_certified').rglob('*.py'))}
+        source[str(Path(__file__).relative_to(ROOT))]=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        inputs={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in [*hosts,*watermarks,ROOT/'configs/dct_qr_theory_after_abc.json']}
+        params={k:v for k,v in vars(args).items() if k not in ('output','resume')}
+        basis={'mode':args.mode,'params':params,
+               'attack_specs':[a.__dict__ for a in attacks],
+               'source_sha256':source,'input_sha256':inputs}
+        self.signature=hashlib.sha256(json.dumps(basis,sort_keys=True,default=str).encode()).hexdigest()
+        self.folder=args.output/(args.mode+'_chunks');self.folder.mkdir(parents=True,exist_ok=True)
+        manifest=self.folder/'journal_manifest.json'
+        if manifest.exists():
+            old=json.loads(manifest.read_text())
+            if old.get('signature')!=self.signature:
+                raise ValueError('Cannot mix different experiment configurations or code versions in one diagnostic output. '
+                                 'Use a new --output directory.')
+        else:
+            manifest.write_text(json.dumps({'signature':self.signature,'protocol':basis},indent=2,default=str))
+        self.resume=args.resume
+
+    def _file(self,key):
+        digest=hashlib.sha256(json.dumps(key,sort_keys=True,default=str).encode()).hexdigest()
+        return self.folder/(digest+'.json')
+
+    def get(self,key):
+        path=self._file(key)
+        if not self.resume or not path.is_file():return None
+        try:
+            data=json.loads(path.read_text())
+            if data.get('signature')==self.signature and data.get('key')==list(key) and data.get('complete') is True:
+                return data['rows']
+        except (OSError,ValueError,TypeError,KeyError):pass
+        return None
+
+    def save(self,key,rows):
+        path=self._file(key)
+        payload={'signature':self.signature,'key':list(key),'complete':True,'rows':jsonable(rows)}
+        tmp=path.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
+        os.replace(tmp,path)
+
+
 def run_ablation(args,hosts,watermarks,attacks):
     base=DCTQRTheoryConfig.from_mapping(json.loads((ROOT/'configs/dct_qr_theory_after_abc.json').read_text()))
     variants=[('full',())]+[(a,(a,)) for a in ABLATION_TO_FIELD]
     variants += [('uniform_step+no_gain_normalization',('uniform_step','no_gain_normalization')),
                  ('no_global_coset+no_spatial_icm',('no_global_coset','no_spatial_icm'))]
-    rows=[]
+    rows=[]; journal=DiagnosticJournal(args,hosts,watermarks,attacks)
     for host_path, wm_path, seed, (name, switches) in itertools.product(hosts,watermarks,args.seeds,variants):
+        job_key=(host_path.name,wm_path.name,seed,name)
+        previous=journal.get(job_key)
+        if previous is not None:
+            rows.extend(previous);continue
+        begin_rows=len(rows)
         row={'host':host_path.name,'watermark':wm_path.name,'seed':seed,'variant':name,'status':'ok'}
         try:
             c=apply_proposal_flags('dct_qr_theory',replace(base,seed=seed),{'ablation':switches})[0]
@@ -109,6 +164,7 @@ def run_ablation(args,hosts,watermarks,attacks):
                 rows.append(r)
         except Exception as exc:
             rows.append(dict(row,status='embed_error',error=f'{type(exc).__name__}: {exc}'))
+        journal.save(job_key,rows[begin_rows:])
         print('ablation',host_path.name,wm_path.name,seed,name,flush=True)
     dump(args.output,'ablation_by_attack',rows,summary_metadata(args))
 
@@ -120,8 +176,13 @@ def run_sensitivity(args,hosts,watermarks,attacks):
     pilot_count=[64,128,256]
     pilot_step=[4.0,6.0,8.0]
     combos=list(itertools.product(reference,pilot_count,pilot_step))
-    rows=[]
+    rows=[];journal=DiagnosticJournal(args,hosts,watermarks,attacks)
     for host_path,wm_path,seed,(step,n_pilots,pstep) in itertools.product(hosts,watermarks,args.seeds,combos):
+        job_key=(host_path.name,wm_path.name,seed,step,n_pilots,pstep)
+        previous=journal.get(job_key)
+        if previous is not None:
+            rows.extend(previous);continue
+        begin_rows=len(rows)
         row={'host':host_path.name,'watermark':wm_path.name,'seed':seed,
              'reference_step':step,'pilot_count':n_pilots,'pilot_step':pstep,'status':'ok'}
         try:
@@ -140,6 +201,7 @@ def run_sensitivity(args,hosts,watermarks,attacks):
                 rows.append(r)
         except Exception as exc:
             rows.append(dict(row,status='embed_error',error=f'{type(exc).__name__}: {exc}'))
+        journal.save(job_key,rows[begin_rows:])
     dump(args.output,'coupled_parameter_sensitivity',rows,summary_metadata(args))
 
 
@@ -149,8 +211,13 @@ def run_security(args,hosts,watermarks,attacks):
     Same-host wrong-seed valid key, plain cover, and correct key positive.
     No forged cryptographic keyspace or encryption claims are made.
     """
-    rows=[]
+    rows=[];journal=DiagnosticJournal(args,hosts,watermarks,attacks)
     for host_path,wm_path,seed in itertools.product(hosts,watermarks,args.seeds):
+        job_key=(host_path.name,wm_path.name,seed,'security')
+        previous=journal.get(job_key)
+        if previous is not None:
+            rows.extend(previous);continue
+        begin_rows=len(rows)
         host=load_host_rgb(host_path); wm=load_watermark_binary(wm_path,size=64)
         a=BenchmarkAdapter(proposal_spec('dct_qr_theory'),ROOT)
         base={'host':host_path.name,'watermark':wm_path.name,'seed':seed}
@@ -181,6 +248,7 @@ def run_security(args,hosts,watermarks,attacks):
                 except Exception as exc:r.update(status='extract_error',error=f'{type(exc).__name__}: {exc}')
                 rows.append(r)
         except Exception as exc:rows.append(dict(base,status='embed_error',error=f'{type(exc).__name__}: {exc}'))
+        journal.save(job_key,rows[begin_rows:])
     dump(args.output,'negative_controls',rows,summary_metadata(args))
     # Only report empirical FPR/TPR at predeclared thresholds, no train/test leakage.
     good=[r for r in rows if r.get('status')=='ok']
@@ -227,12 +295,16 @@ def run_edge(args):
 
 def run_timing(args,hosts,watermarks,attacks):
     specs=resolve_methods(args.methods)
-    rows=[]
+    rows=[];journal=DiagnosticJournal(args,hosts,watermarks,attacks)
     for spec in specs:
         a=BenchmarkAdapter(spec,ROOT)
         for host_path,wm_path in itertools.product(hosts,watermarks):
             host=load_host_rgb(host_path);wm=load_watermark_binary(wm_path,size=spec.payload_size)
             for repeat in range(args.timing_warmups+args.timing_repeats):
+                job_key=(spec.method_id,host_path.name,wm_path.name,repeat,'timing')
+                previous=journal.get(job_key)
+                if previous is not None:
+                    rows.extend(previous);continue
                 row={'method_id':spec.method_id,'host':host_path.name,'watermark':wm_path.name,
                     'repeat':repeat,'phase':'warmup' if repeat<args.timing_warmups else 'timed',
                     'payload_bits':wm.size,'status':'ok'}
@@ -245,6 +317,7 @@ def run_timing(args,hosts,watermarks,attacks):
                     row['nc']=watermark_metrics(wm,decoded)['nc']
                 except Exception as exc:row.update(status='error',error=f'{type(exc).__name__}: {exc}')
                 rows.append(row)
+                journal.save(job_key,[row])
     dump(args.output,'runtime_wall_clock',rows,summary_metadata(args)|{
         'timing_includes':'embed and aligned clean extract, wall clock, excludes image loading',
         'fps_definition':'1/(embed_seconds+extract_seconds), serial still-image throughput; not video FPS',
@@ -283,6 +356,8 @@ def run_gallery(args,hosts,watermarks,attacks):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode',choices=('ablation','sensitivity','security','edge','timing','gallery'),required=True)
+    p.add_argument('--resume',action=argparse.BooleanOptionalAction,default=True,
+                   help='Resume atomic per-configuration chunks where supported.')
     p.add_argument('--partition',choices=('validation','test','all'),default='test')
     p.add_argument('--attack-suite',default='common20')
     p.add_argument('--host-limit',type=int)

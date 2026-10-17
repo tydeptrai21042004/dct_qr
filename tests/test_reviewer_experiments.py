@@ -43,6 +43,15 @@ def test_skip_failed_trials_for_resume(tmp_path):
     assert not module._valid_trial(trial,protocol_id='x',attack_ids=('jpeg',),fingerprint='hash')
     payload.update(status='ok',rows=[{'attack_id':'jpeg','status':'error'}]);trial.write_text(json.dumps(payload))
     assert not module._valid_trial(trial,protocol_id='x',attack_ids=('jpeg',),fingerprint='hash')
-    payload['rows'][0]['status']='ok';trial.write_text(json.dumps(payload))
+    payload['rows'][0].update(status='ok', method_id='dct_qr_theory', seed=2026,
+                              attacked_nc=1.0, attacked_ber=0.0, attacked_bit_accuracy=1.0,
+                              embedding_ssim=0.99, embedding_psnr_db=50.0)
+    payload.update(method_id='dct_qr_theory', seed=2026,
+                   embedding_metrics={'psnr_db':50.0,'ssim':0.99},
+                   clean_watermark_metrics={'nc':1.0,'ber':0.0})
+    trial.write_text(json.dumps(payload))
     assert module._valid_trial(trial,protocol_id='x',attack_ids=('jpeg',),fingerprint='hash')
+    payload['rows'][0]['attacked_ber']=None;trial.write_text(json.dumps(payload))
+    assert not module._valid_trial(trial,protocol_id='x',attack_ids=('jpeg',),fingerprint='hash')
+    payload['rows'][0]['attacked_ber']=0.0;trial.write_text(json.dumps(payload))
     assert not module._valid_trial(trial,protocol_id='x',attack_ids=('jpeg',),fingerprint='different')

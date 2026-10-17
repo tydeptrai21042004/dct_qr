@@ -6,6 +6,8 @@ that ignores `step` is explicitly marked uncalibratable, never silently shown
 as matched. Failed/infeasible runs are retained in output.
 """
 import argparse
+import hashlib
+import os
 import csv
 import json
 import sys
@@ -62,6 +64,7 @@ def main():
     p.add_argument('--test-limit',type=int,default=None)
     p.add_argument('--strengths',nargs='+',type=float,default=[2,4,6,8,10,12,16,20,26,34])
     p.add_argument('--output',type=Path,default=ROOT/'results/reviewer_matched_psnr')
+    p.add_argument('--resume',action=argparse.BooleanOptionalAction,default=True)
     args=p.parse_args()
     if args.tolerance<=0:p.error('tolerance must be positive')
     train,test=split_hosts(list_image_files(ROOT/'data/host'))
@@ -73,9 +76,39 @@ def main():
     specs=resolve_methods(args.methods)
     attacks=get_attack_suite(args.suite)
     if args.attack_limit:attacks=attacks[:args.attack_limit]
+    # Calibration is expensive. Store each method/target with an atomic
+    # manifest-bound checkpoint. Never pool outputs from different versions.
+    protocol={
+        'methods':[spec.method_id for spec in specs], 'targets':args.targets,
+        'strengths':args.strengths, 'tolerance':args.tolerance,
+        'validation_hosts':[p.name for p in train], 'test_hosts':[p.name for p in test],
+        'watermark_files':[p.name for p in wm_paths],
+        'attack_suite':args.suite,'attack_ids':[a.attack_id for a in attacks],
+        'code_hashes':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
+                       for p in sorted((ROOT/'src'/'qr64_certified').rglob('*.py'))},
+        'source_script_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        'input_hashes':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
+                        for p in [*train,*test,*wm_paths,ROOT/'configs/benchmark/baseline_parameters.json']},
+    }
+    fp=hashlib.sha256(json.dumps(protocol,sort_keys=True).encode()).hexdigest()
+    chunks=args.output/'calibration_chunks';chunks.mkdir(parents=True,exist_ok=True)
+    journal=chunks/'manifest.json'
+    if journal.exists() and json.loads(journal.read_text()).get('fingerprint')!=fp:
+        raise RuntimeError('Existing matched-PSNR checkpoint has different source or settings. Use a new --output.')
+    if not journal.exists():
+        journal.write_text(json.dumps({'fingerprint':fp,'protocol':protocol},indent=2))
     calibration=[];test_rows=[]
     for spec in specs:
         for target in args.targets:
+            checkpoint=chunks/(spec.method_id+'__'+str(target).replace('.','p')+'.json')
+            if args.resume and checkpoint.is_file():
+                record=json.loads(checkpoint.read_text())
+                if record.get('fingerprint')==fp and record.get('complete') is True:
+                    calibration.append(record['calibration'])
+                    test_rows.extend(record['test_rows'])
+                    print('RESUMED',spec.method_id,target,flush=True)
+                    continue
+            current_rows=[]
             candidates=[]
             for strength in args.strengths:
                 adapter=configured_adapter(spec,strength,params)
@@ -95,34 +128,39 @@ def main():
                        'feasible':feasible,'candidate_count':len(candidates),
                        'distinct_validation_operating_points':distinct,
                        'candidates':candidates,'validation_hosts':[p.name for p in train]}
-            calibration.append(calibrate)
             print('calibration',spec.method_id,target,'feasible',feasible,flush=True)
-            if not feasible:continue
-            adapter=configured_adapter(spec,chosen['strength'],params)
-            for host_path in test:
-                host=load_host_rgb(host_path)
-                for wm_path in wm_paths:
-                    watermark=load_watermark_binary(wm_path,size=spec.payload_size)
-                    run={'method_id':spec.method_id,'host_id':host_path.name,
-                         'watermark_id':wm_path.name,'target_psnr_db':target,
-                         'chosen_strength':chosen['strength'],'payload_bits':spec.payload_bits,
-                         'blindness_tier':spec.blindness_tier,'status':'ok'}
-                    try:
-                        start=time.perf_counter();image,key,_=adapter.embed(host,watermark,seed=3101)
-                        run['embed_seconds']=time.perf_counter()-start
-                        run['achieved_psnr_db']=image_quality_metrics(host,image)['psnr_db']
-                        run['test_psnr_within_tolerance']=abs(run['achieved_psnr_db']-target)<=args.tolerance
-                        decoded,_=adapter.extract(image,key,original_host=host if spec.requires_original_host else None)
-                        run.update({f'clean_{k}':v for k,v in watermark_metrics(watermark,decoded).items()})
-                        for attack in attacks:
-                            r=dict(run,attack_id=attack.attack_id,attack_category=attack.category)
-                            try:
-                                attacked=apply_attack(image,attack)
-                                recovered,_=adapter.extract(attacked,key,original_host=host if spec.requires_original_host else None)
-                                r.update({f'attacked_{k}':v for k,v in watermark_metrics(watermark,recovered).items()})
-                            except Exception as exc:r.update(status='attack_error',error=f'{type(exc).__name__}: {exc}')
-                            test_rows.append(r)
-                    except Exception as exc:test_rows.append(dict(run,status='embed_error',error=f'{type(exc).__name__}: {exc}'))
+            if feasible:
+                adapter=configured_adapter(spec,chosen['strength'],params)
+                for host_path in test:
+                    host=load_host_rgb(host_path)
+                    for wm_path in wm_paths:
+                        watermark=load_watermark_binary(wm_path,size=spec.payload_size)
+                        run={'method_id':spec.method_id,'host_id':host_path.name,
+                             'watermark_id':wm_path.name,'target_psnr_db':target,
+                             'chosen_strength':chosen['strength'],'payload_bits':spec.payload_bits,
+                             'blindness_tier':spec.blindness_tier,'status':'ok'}
+                        try:
+                            start=time.perf_counter();image,key,_=adapter.embed(host,watermark,seed=3101)
+                            run['embed_seconds']=time.perf_counter()-start
+                            run['achieved_psnr_db']=image_quality_metrics(host,image)['psnr_db']
+                            run['test_psnr_within_tolerance']=abs(run['achieved_psnr_db']-target)<=args.tolerance
+                            decoded,_=adapter.extract(image,key,original_host=host if spec.requires_original_host else None)
+                            run.update({f'clean_{k}':v for k,v in watermark_metrics(watermark,decoded).items()})
+                            for attack in attacks:
+                                r=dict(run,attack_id=attack.attack_id,attack_category=attack.category)
+                                try:
+                                    attacked=apply_attack(image,attack)
+                                    recovered,_=adapter.extract(attacked,key,original_host=host if spec.requires_original_host else None)
+                                    r.update({f'attacked_{k}':v for k,v in watermark_metrics(watermark,recovered).items()})
+                                except Exception as exc:r.update(status='attack_error',error=f'{type(exc).__name__}: {exc}')
+                                current_rows.append(r)
+                        except Exception as exc:current_rows.append(dict(run,status='embed_error',error=f'{type(exc).__name__}: {exc}'))
+            record={'fingerprint':fp,'complete':True,'calibration':calibrate,'test_rows':current_rows}
+            temp=checkpoint.with_suffix('.json.tmp')
+            temp.write_text(json.dumps(record,indent=2),encoding='utf-8')
+            os.replace(temp,checkpoint)
+            calibration.append(calibrate)
+            test_rows.extend(current_rows)
     args.output.mkdir(parents=True,exist_ok=True)
     (args.output/'predeclared_protocol.json').write_text(json.dumps({
         'validation_host_names':[p.name for p in train],'heldout_host_names':[p.name for p in test],
@@ -131,5 +169,22 @@ def main():
         'warning':'Only strength-tunable baselines with equal payload and achieved PSNR within tolerance are fair matched comparisons; others are reported infeasible, not coerced'},indent=2))
     dump(args.output,'calibration',calibration,{'splits':'host-disjoint','all_failures_retained':True})
     dump(args.output,'heldout_matched_results',test_rows,{'splits':'host-disjoint','all_failures_retained':True})
+    by_group=defaultdict(list)
+    for row in test_rows:
+        by_group[(row['method_id'],row['target_psnr_db'])].append(row)
+    strict=[]
+    for entry in calibration:
+        group=by_group.get((entry['method_id'],entry['target_psnr_db']),[])
+        all_success=bool(group) and all(r.get('status')=='ok' and
+                r.get('test_psnr_within_tolerance') is True for r in group)
+        strict.append({'method_id':entry['method_id'],'target_psnr_db':entry['target_psnr_db'],
+                       'validation_calibration_feasible':entry['feasible'],
+                       'heldout_attack_rows':len(group),
+                       'heldout_all_rows_meet_psnr_tolerance':all_success,
+                       'claim_fairly_matched':entry['feasible'] and all_success})
+    (args.output/'matched_psnr_feasibility.json').write_text(json.dumps({
+        'fingerprint':fp,'methods_targets':strict,
+        'warning':'Validation feasibility does not imply held-out PSNR matching; '
+                  'only claim a fair matched comparison when all paired runs meet tolerance.'},indent=2))
     print('Saved',args.output,'test_rows',len(test_rows),flush=True)
 if __name__=='__main__':main()

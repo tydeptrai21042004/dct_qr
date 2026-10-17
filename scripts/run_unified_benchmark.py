@@ -5,6 +5,8 @@ import argparse
 import hashlib
 import json
 import os
+import math
+import signal
 import platform
 from dataclasses import replace
 from pathlib import Path
@@ -57,20 +59,65 @@ def _parse_seed_list(raw: str) -> tuple[int, ...]:
     return values
 
 
-def _valid_trial(path: Path, *, protocol_id: str, attack_ids: tuple[str, ...], fingerprint: str | None = None) -> bool:
+# A successful process exit or trial.status == "ok" is not evidence that
+# its metrics are complete. These fields are required for a publishable trial.
+METRICS = ("embedding_metrics", "clean_watermark_metrics")
+ROW_METRICS = ("attacked_nc", "attacked_ber", "attacked_bit_accuracy",
+               "embedding_ssim", "embedding_psnr_db")
+
+
+def _finite_number(value: Any) -> bool:
+    return isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _trial_issues(payload: Any, *, protocol_id: str,
+                  attack_ids: tuple[str, ...], fingerprint: str | None = None,
+                  identity: tuple[str, str, str, int] | None = None) -> list[str]:
+    if not isinstance(payload, dict):
+        return ["invalid_json_object"]
+    issues = []
+    if payload.get("protocol_id") != protocol_id:
+        issues.append("wrong_protocol")
+    if fingerprint is not None and payload.get("experiment_fingerprint") != fingerprint:
+        issues.append("wrong_fingerprint")
+    if identity is not None and (payload.get("method_id"), payload.get("host_id"),
+                                 payload.get("watermark_id"), payload.get("seed")) != identity:
+        issues.append("wrong_identity")
+    if payload.get("status") != "ok":
+        issues.append("failed_trial")
+    for group, fields in (("embedding_metrics", ("psnr_db", "ssim")),
+                          ("clean_watermark_metrics", ("nc", "ber"))):
+        metrics = payload.get(group)
+        if not isinstance(metrics, dict) or any(not _finite_number(metrics.get(f)) for f in fields):
+            issues.append(f"nonfinite_or_missing_{group}")
+    rows = payload.get("rows", [])
+    if not isinstance(rows, list) or len(rows) != len(attack_ids):
+        issues.append("wrong_attack_count")
+    if not isinstance(rows, list):
+        return issues
+    ids = [r.get("attack_id") for r in rows if isinstance(r, dict)]
+    if len(ids) != len(rows) or tuple(ids) != attack_ids:
+        issues.append("missing_duplicate_or_misordered_attacks")
+    for row in rows:
+        if not isinstance(row, dict) or row.get("status") != "ok":
+            issues.append("failed_attack")
+            continue
+        if any(not _finite_number(row.get(f)) for f in ROW_METRICS):
+            issues.append("nonfinite_or_missing_attack_metrics")
+        if row.get("method_id") != payload.get("method_id") or row.get("seed") != payload.get("seed"):
+            issues.append("wrong_attack_identity")
+    return sorted(set(issues))
+
+
+def _valid_trial(path: Path, *, protocol_id: str, attack_ids: tuple[str, ...],
+                 fingerprint: str | None = None,
+                 identity: tuple[str, str, str, int] | None = None) -> bool:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict) or payload.get("protocol_id") != protocol_id:
-            return False
-        if "status" not in payload or "rows" not in payload:
-            return False
-        if payload.get("status") != "ok":
-            return False
-        if fingerprint is not None and payload.get("experiment_fingerprint") != fingerprint:
-            return False
-        row_ids = tuple(str(row.get("attack_id")) for row in payload.get("rows", []))
-        return row_ids == attack_ids and all(row.get("status") == "ok" for row in payload.get("rows", []))
-    except Exception:
+        return not _trial_issues(payload, protocol_id=protocol_id,
+                                 attack_ids=attack_ids, fingerprint=fingerprint,
+                                 identity=identity)
+    except (OSError, json.JSONDecodeError):
         return False
 
 
@@ -117,12 +164,22 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, help="Root output directory override.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--strict-clean-proposals", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--max-seconds", type=float, default=None,
+                        help="Finish the active trial, then checkpoint and stop at this session budget.")
+    parser.add_argument("--max-trials", type=int, default=None,
+                        help="Limit new trial attempts in this invocation (for smoke/CI tests).")
+    parser.add_argument("--retry-failed", action="store_true",
+                        help="Reattempt previously saved failures (off by default to avoid endless retries).")
     parser.add_argument(
         "--baseline-parameters",
         type=Path,
         default=ROOT / "configs/benchmark/baseline_parameters.json",
     )
     args = parser.parse_args()
+    if args.max_seconds is not None and args.max_seconds <= 0:
+        parser.error("--max-seconds must be positive")
+    if args.max_trials is not None and args.max_trials <= 0:
+        parser.error("--max-trials must be positive")
 
     os.environ.setdefault("JILP_NUM_THREADS", "1")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -196,17 +253,60 @@ def main() -> None:
     manifest['source_sha256'] = {str(path.relative_to(ROOT)): _hash_file(path) for path in source_paths}
     manifest['baseline_parameters_sha256'] = _hash_file(args.baseline_parameters)
     fingerprint_basis = {k:v for k,v in manifest.items() if k not in ('environment', 'protocol_file')}
+    # Output location and retry policy do not affect scientific measurements.
+    # Exclude them so an identical experiment can resume from a restored ZIP
+    # even if the notebook's working directory changes.
+    fingerprint_basis['protocol'] = {k:v for k,v in manifest['protocol'].items()
+                                     if k not in ('output_dir','resume','continue_on_error')}
     experiment_fingerprint = hashlib.sha256(json.dumps(fingerprint_basis, sort_keys=True).encode()).hexdigest()
     manifest['experiment_fingerprint'] = experiment_fingerprint
-    _write_atomic(base_output / "manifest.json", manifest)
+    previous_manifest = base_output / "manifest.json"
+    if previous_manifest.exists():
+        try:
+            prior = json.loads(previous_manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"Invalid previous manifest, use a new output directory: {exc}")
+        old_fp = prior.get("experiment_fingerprint")
+        if old_fp != experiment_fingerprint:
+            parser.error("Existing output directory belongs to a DIFFERENT source/configuration fingerprint. "
+                         "Use a new output directory; never combine different method versions.")
+    _write_atomic(previous_manifest, manifest)
 
     watermark_cache: dict[tuple[Path, int], Any] = {}
     expected_attack_ids = tuple(attack.attack_id for attack in attacks)
     total = len(methods) * len(hosts) * len(watermark_paths) * len(protocol.seeds)
-    completed = 0
-    skipped = 0
+    visited = 0
+    skipped_ok = 0
+    skipped_failed = 0
+    attempted = 0
     started_all = time.perf_counter()
+    graceful_stop = [False]
+    def _request_stop(signum, frame):
+        graceful_stop[0] = True
+        print(f"Received signal {signum}: finishing current trial and preserving checkpoint", flush=True)
+    # TERM is best effort; Kaggle may hard-kill the kernel instead.
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, _request_stop)
+        except (ValueError, OSError):
+            pass
+    stop_reason = "finished_all_requested_trials"
 
+    def _save_progress(phase: str, filename: str | None = None) -> None:
+        _write_atomic(base_output / "progress.json", {
+            "phase": phase,
+            "experiment_fingerprint": experiment_fingerprint,
+            "protocol_id": protocol.protocol_id,
+            "trials_expected": total,
+            "trials_visited_this_session": visited,
+            "trials_skipped_successful_this_session": skipped_ok,
+            "trials_skipped_failed_this_session": skipped_failed,
+            "trials_attempted_this_session": attempted,
+            "last_trial": filename,
+            "elapsed_seconds": float(time.perf_counter() - started_all),
+        })
+
+    _save_progress("running")
     for spec in methods:
         adapter = BenchmarkAdapter(spec, ROOT, baseline_params.get(spec.method_id))
         print(f"\n[{spec.method_kind}] {spec.method_id} | {spec.display_name}", flush=True)
@@ -219,31 +319,37 @@ def main() -> None:
                 watermark = watermark_cache[cache_key]
                 for seed in protocol.seeds:
                     filename = "__".join([
-                        _slug(spec.method_id),
-                        _slug(host_path.stem),
-                        _slug(watermark_path.stem),
-                        f"seed{seed}",
+                        _slug(spec.method_id), _slug(host_path.stem),
+                        _slug(watermark_path.stem), f"seed{seed}",
                     ]) + ".json"
                     output_path = trial_dir / filename
-                    if protocol.resume and output_path.exists() and _valid_trial(
-                        output_path, protocol_id=protocol.protocol_id, attack_ids=expected_attack_ids,
-                        fingerprint=experiment_fingerprint
-                    ):
-                        skipped += 1
-                        completed += 1
-                        print(f"  SKIP {completed:04d}/{total:04d} {filename}", flush=True)
-                        continue
-
+                    identity = (spec.method_id, host_path.name, watermark_path.name, seed)
+                    if protocol.resume and output_path.exists():
+                        try:
+                            old_record = json.loads(output_path.read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError):
+                            old_record = None
+                        if isinstance(old_record, dict) and (
+                            old_record.get("experiment_fingerprint") == experiment_fingerprint
+                            and old_record.get("protocol_id") == protocol.protocol_id
+                            and (old_record.get("method_id"),old_record.get("host_id"),
+                                 old_record.get("watermark_id"),old_record.get("seed")) == identity
+                        ):
+                            if not _trial_issues(old_record, protocol_id=protocol.protocol_id,
+                                                  attack_ids=expected_attack_ids,
+                                                  fingerprint=experiment_fingerprint, identity=identity):
+                                skipped_ok += 1
+                                visited += 1
+                                continue
+                            if not args.retry_failed:
+                                skipped_failed += 1
+                                visited += 1
+                                continue
                     started = time.perf_counter()
                     trial = evaluate_trial(
-                        adapter,
-                        host,
-                        watermark,
-                        attacks,
+                        adapter, host, watermark, attacks,
                         protocol_id=protocol.protocol_id,
-                        host_id=host_path.name,
-                        watermark_id=watermark_path.name,
-                        seed=seed,
+                        host_id=host_path.name, watermark_id=watermark_path.name, seed=seed,
                         continue_on_error=protocol.continue_on_error,
                         strict_clean_proposal=protocol.strict_clean_proposals,
                     )
@@ -251,41 +357,66 @@ def main() -> None:
                     trial["trial_seconds"] = float(time.perf_counter() - started)
                     trial["trial_file"] = filename
                     _write_atomic(output_path, trial)
-                    completed += 1
-                    clean = trial.get("clean_watermark_metrics", {}).get("nc")
-                    psnr_value = trial.get("embedding_metrics", {}).get("psnr_db")
-                    print(
-                        f"  RUN  {completed:04d}/{total:04d} {host_path.name:<16} "
-                        f"wm={watermark_path.name:<22} seed={seed} status={trial.get('status')} "
-                        f"PSNR={psnr_value} cleanNC={clean}",
-                        flush=True,
-                    )
+                    attempted += 1
+                    visited += 1
+                    problems = _trial_issues(trial, protocol_id=protocol.protocol_id,
+                                              attack_ids=expected_attack_ids,
+                                              fingerprint=experiment_fingerprint, identity=identity)
+                    print(f"  RUN {visited:04d}/{total:04d} {filename} "
+                          f"status={trial.get('status')} audit={'PASS' if not problems else ','.join(problems)}",
+                          flush=True)
+                    _save_progress("running", filename)
+                    if graceful_stop[0]:
+                        stop_reason = "signal_requested"
+                    elif args.max_seconds is not None and time.perf_counter() - started_all >= args.max_seconds:
+                        stop_reason = "session_time_budget_reached"
+                    elif args.max_trials is not None and attempted >= args.max_trials:
+                        stop_reason = "session_trial_limit_reached"
+                    if stop_reason != "finished_all_requested_trials":
+                        break
+                if stop_reason != "finished_all_requested_trials": break
+            if stop_reason != "finished_all_requested_trials": break
+        if stop_reason != "finished_all_requested_trials": break
 
     report = write_aggregate(trial_dir, aggregate_dir, fingerprint=experiment_fingerprint)
-    # A completed loop is not equivalent to a scientifically complete benchmark.
-    saved = []
-    for path in trial_dir.glob('*.json'):
+    expected_keys = {(s.method_id, h.name, w.name, int(seed)) for s in methods for h in hosts
+                     for w in watermark_paths for seed in protocol.seeds}
+    recorded: dict[tuple[str, str, str, int], list[str]] = {}
+    for path in trial_dir.glob("*.json"):
         try:
-            record = json.loads(path.read_text(encoding='utf-8'))
-            if record.get('experiment_fingerprint') == experiment_fingerprint:
-                saved.append(record)
-        except (OSError, ValueError):
-            pass
-    valid = sum(t.get('status') == 'ok' and len(t.get('rows', [])) == len(attacks)
-                and all(r.get('status') == 'ok' for r in t.get('rows', [])) for t in saved)
+            item = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if item.get("experiment_fingerprint") != experiment_fingerprint:
+            continue
+        key = (item.get("method_id"), item.get("host_id"), item.get("watermark_id"), item.get("seed"))
+        if key not in expected_keys:
+            continue
+        recorded[key] = _trial_issues(item, protocol_id=protocol.protocol_id,
+                                      attack_ids=expected_attack_ids,
+                                      fingerprint=experiment_fingerprint, identity=key)
+    valid = sum(not issues for issues in recorded.values())
+    failed = len(recorded) - valid
+    missing = len(expected_keys) - len(recorded)
     run_summary = {
-        'trials_successful_with_complete_attacks': valid,
-        'all_requested_trials_successful': valid == total,
-        'experiment_fingerprint': experiment_fingerprint,
+        "trials_successful_with_complete_attacks": valid,
+        "trials_failed_or_invalid": failed,
+        "trials_missing": missing,
+        "all_requested_trials_successful": valid == total and failed == 0 and missing == 0,
+        "stop_reason": stop_reason,
+        "experiment_fingerprint": experiment_fingerprint,
         "protocol_id": protocol.protocol_id,
         "trials_expected": total,
-        "trials_completed_or_skipped": completed,
-        "trials_skipped": skipped,
-        "attack_rows": report["row_count"],
-        "seconds": float(time.perf_counter() - started_all),
+        "trials_visited_this_session": visited,
+        "trials_attempted_this_session": attempted,
+        "trials_skipped_successful_this_session": skipped_ok,
+        "trials_skipped_failed_this_session": skipped_failed,
+        "attack_rows_saved_including_partial": report["row_count"],
+        "seconds_this_session": float(time.perf_counter() - started_all),
         "output_directory": str(base_output),
     }
     _write_atomic(base_output / "run_summary.json", run_summary)
+    _save_progress("finished_session")
     print(json.dumps(run_summary, indent=2), flush=True)
 
 

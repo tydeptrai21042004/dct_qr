@@ -12,6 +12,7 @@ import numpy as np
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 from qr64_certified.benchmark.aggregation import load_trials,write_csv
+from run_unified_benchmark import _trial_issues
 
 
 def safe_mean(values):
@@ -59,10 +60,13 @@ def report(base:Path,out:Path,reference:str,psnr_tolerance:float,reps:int):
         rows=trial.get('rows',[])
         ids={r.get('attack_id') for r in rows}
         fail=[r.get('attack_id') for r in rows if r.get('status')!='ok']
-        if trial.get('status')!='ok' or ids!=attack_ids or fail:
+        issues=_trial_issues(trial, protocol_id=manifest['protocol']['protocol_id'],
+                             attack_ids=tuple(a['attack_id'] for a in manifest['attacks']),
+                             fingerprint=fingerprint)
+        if issues:
             failures.append({'method_id':trial.get('method_id'),'host':trial.get('host_id'),
                 'watermark':trial.get('watermark_id'),'seed':trial.get('seed'),'trial_status':trial.get('status'),
-                'missing_attacks':sorted(attack_ids-ids),'failed_attacks':fail})
+                'missing_attacks':sorted(attack_ids-ids),'failed_attacks':fail,'validation_issues':issues})
     completeness={
        'experiment_fingerprint':fingerprint,
        'expected_trials':len(expected),'current_trials':len(trials),'stale_trials':len(trials_all)-len(trials),
@@ -73,8 +77,9 @@ def report(base:Path,out:Path,reference:str,psnr_tolerance:float,reps:int):
     (out/'completeness.json').write_text(json.dumps(completeness,indent=2))
 
     valid=[]
-    for t in trials:
-        if t.get('status')!='ok':continue
+    valid_trials=[t for t in trials if not _trial_issues(t, protocol_id=manifest['protocol']['protocol_id'],
+                      attack_ids=tuple(a['attack_id'] for a in manifest['attacks']), fingerprint=fingerprint)]
+    for t in valid_trials:
         for row in t.get('rows',[]):
             if row.get('status')=='ok':valid.append(row)
 
@@ -132,7 +137,7 @@ def report(base:Path,out:Path,reference:str,psnr_tolerance:float,reps:int):
     # Honest runtime and serialized key disclosure in one place.
     timing=[]
     for m in methods:
-        mt=[t for t in trials if t.get('status')=='ok' and t.get('method_id')==m]
+        mt=[t for t in valid_trials if t.get('method_id')==m]
         extract=[float(t['clean_extract_seconds']) for t in mt if isinstance(t.get('clean_extract_seconds'),(int,float))]
         embed=[float(t['embed_seconds']) for t in mt if isinstance(t.get('embed_seconds'),(int,float))]
         keys=[float(t['key_size_bytes']) for t in mt if isinstance(t.get('key_size_bytes'),(int,float))]
