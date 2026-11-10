@@ -78,5 +78,22 @@
     "repeat": 1,
     "step": null,
     "method_params": {}
+  },
+  "qr_nha2022_blind": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {
+      "q": 10.0,
+      "arnold_iter": 10
+    }
+  },
+  "dct_adaptive_ariatmanto2019_keyassisted": {
+    "repeat": 1,
+    "step": null,
+    "method_params": {
+      "mode": "adapt",
+      "arnold_iter": 10,
+      "detection_margin": 3.0
+    }
   }
 }

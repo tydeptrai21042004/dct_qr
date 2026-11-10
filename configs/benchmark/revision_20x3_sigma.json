@@ -1,5 +1,5 @@
 {
-  "protocol_id": "dctqr_revision20x3_sigma_2026_11_v1",
+  "protocol_id": "dctqr_revision20x3_sigma_2026_11_v2_table10",
   "host_dir": "data/host",
   "host_files": [
     "airplane.bmp",
@@ -24,10 +24,17 @@
   ],
   "attack_suite": "revision_20x3_sigma",
   "methods": [
-    "dct_qr_theory",
+    "dwt_entropy_kumar2021_nonblind",
+    "dwt_svd_roy2018_semiblind",
+    "dct_ca_qim_mao2024_semiblind",
+    "dwt_wht_svd_kumar2024_semiblind",
+    "dwt_hessenberg_svd_paper2025_semiblind",
     "dwt_qr_fa_guo2017_keyassisted",
+    "iwt_svd_qim_zhu2021_blind",
     "hessenberg_nha2023_blind",
-    "dct_dm_qim_chen2001_blind"
+    "qr_nha2022_blind",
+    "dct_adaptive_ariatmanto2019_keyassisted",
+    "dct_qr_theory"
   ],
   "output_dir": "results/revision_20x3",
   "continue_on_error": true,

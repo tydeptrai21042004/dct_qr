@@ -1,0 +1,34 @@
+PATCH-ONLY vs dct_qr-main (1).zip
+Proposed method code is unchanged. Datasets are excluded.
+
+BASELINE_INTEGRATION_NOTES.md
+FINAL_REVISION_README.md
+NEW_BASELINES_2019_2022_README.md
+REVISION_GAUSS_CROP_QR_README.md
+configs/benchmark/baseline_parameters.json
+configs/benchmark/revision_20x3_sigma.json
+configs/benchmark/revision_20x3_variance.json
+configs/benchmark/tiffany_fig4_sigma.json
+configs/benchmark/tiffany_fig4_variance.json
+configs/benchmark/two_new_baselines_20x3.json
+scripts/export_revision_extended_experiments.py
+scripts/export_revision_extraction_gallery.py
+scripts/export_revision_fig_tables.py
+scripts/export_revision_figure4_tiffany.py
+scripts/run_comparison_gallery.py
+scripts/run_dct_qr_theory_numerics.py
+scripts/run_revision_ablation_grid.py
+scripts/run_theory_ablation.py
+scripts/run_unified_benchmark.py
+src/qr64_certified/attacks/operations.py
+src/qr64_certified/attacks/presets.py
+src/qr64_certified/baselines/implementations/dct/ariatmanto_dct2019.py
+src/qr64_certified/baselines/implementations/transform/nha_qr2022.py
+src/qr64_certified/baselines/metadata.py
+src/qr64_certified/baselines/registry.py
+src/qr64_certified/benchmark/types.py
+src/qr64_certified/common/io.py
+tests/test_final_revision_experiments.py
+tests/test_new_qr_dct_baselines.py
+tests/test_revision_20x3_protocol.py
+tests/test_slim_method_scope.py

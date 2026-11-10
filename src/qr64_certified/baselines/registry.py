@@ -18,6 +18,8 @@ from .implementations.transform.dwt_wht_svd2024 import DWTWHTSVD2024
 from .implementations.transform.gaata2022_dwt_hess_fwa import Gaata2022DWTHessFWA
 from .implementations.transform.guo2017_dwt_qr_fa import Guo2017DWTQRFA
 from .implementations.transform.hess_nha2023 import HessNha2023Hessenberg
+from .implementations.transform.nha_qr2022 import NhaQR2022
+from .implementations.dct.ariatmanto_dct2019 import AriatmantoDCT2019
 from .implementations.transform.kumar2021_dwt_entropy import Kumar2021DWTEntropy
 from .implementations.transform.qwt_qsvd_zhang2022 import QWTQSVDZhang2022
 from .implementations.transform.roy2018_dwt_svd import Roy2018DWTSVD
@@ -48,6 +50,10 @@ def _class_factory(native_id: str, params: dict[str, Any]):
         return Gaata2022DWTHessFWA(**options)
     if native_id == "dwt_hd_svd_2025":
         return DWTHDSVD2025(**options)
+    if native_id == "ariatmanto_dct2019":
+        return AriatmantoDCT2019(**options)
+    if native_id == "nha_qr2022":
+        return NhaQR2022(**options)
     if native_id == "hess_nha2023":
         return HessNha2023Hessenberg(**options)
     if native_id == "roy2018_dwt_svd":
@@ -79,6 +85,8 @@ _EXTRA_ALIASES: dict[str, tuple[str, ...]] = {
     "dwt_hessenberg_fwa_gaata2022_keyassisted": ("gaata2022",),
     "dwt_hessenberg_svd_paper2025_semiblind": ("dwt_hd_svd_2025",),
     "hessenberg_nha2023_blind": ("hess_nha2023",),
+    "qr_nha2022_blind": ("nha_qr2022", "qr_nha2022"),
+    "dct_adaptive_ariatmanto2019_keyassisted": ("ariatmanto2019", "dct_2019"),
     "dwt_svd_roy2018_semiblind": ("roy2018",),
     "dwt_wht_svd_kumar2024_semiblind": ("dwt_wht_svd_2024",),
     "qwt_qsvd_zhang2022_blind": (),

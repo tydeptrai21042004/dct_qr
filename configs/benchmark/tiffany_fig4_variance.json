@@ -1,0 +1,23 @@
+{
+  "protocol_id": "dctqr_fig4_tiffany_c_revision20x3_variance_2026_11_v1",
+  "host_dir": "data/host",
+  "host_files": [
+    "tiffany.bmp"
+  ],
+  "watermarks": [
+    "data/watermark/Cc.logo.circle.png"
+  ],
+  "seeds": [
+    2026
+  ],
+  "attack_suite": "revision_20x3_variance",
+  "methods": [
+    "dct_qr_theory"
+  ],
+  "output_dir": "results/revision_fig4",
+  "continue_on_error": true,
+  "resume": true,
+  "strict_clean_proposals": true,
+  "host_limit": null,
+  "attack_limit": null
+}

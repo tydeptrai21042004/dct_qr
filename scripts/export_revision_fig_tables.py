@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Table 5, Table 6 and a comparison figure from ONE validated run.
+"""Generate Table 10, Table 6 and Fig. 5 from ONE validated run.
 
 Never replaces missing/failed experiments by zeros. No clean controls are in
 revision_20x3_* suites. The default is strict publication mode.
@@ -98,8 +98,10 @@ def write_report(base: Path, output: Path):
                 by_family_severity[(family(row['attack_id']), row['attack_severity'])].append(row)
 
     method_names = {m['method_id']: m.get('display_name', m['method_id']) for m in manifest['methods']}
+    # Match the method order declared in the exact protocol (the agreed Table 10 order).
+    table_order = [m["method_id"] for m in manifest["methods"]]
     t5 = []
-    for mid in sorted(by_method):
+    for mid in table_order:
         rows = by_method[mid]
         ncs = np.asarray([float(r['attacked_nc']) for r in rows])
         bers = np.asarray([float(r['attacked_ber']) for r in rows])
@@ -113,6 +115,22 @@ def write_report(base: Path, output: Path):
                    'case_count': len(rows)})
     dump(output/'table5_comparison.csv', t5,
          ['method_id','display_name','detector','psnr_db','ssim','mean_nc','p5_nc','min_nc','mean_ber','case_count'])
+    # Same validated trial rows, optional table-number alias for the updated
+    # manuscript.  Never insert zero-filled placeholder baselines.
+    dump(output/'table10_equal_payload_comparison.csv', t5,
+         ['method_id','display_name','detector','psnr_db','ssim','mean_nc','p5_nc','min_nc','mean_ber','case_count'])
+    clean_rows = []
+    for mid in table_order:
+        native = [x for x in trials if x['method_id'] == mid]
+        clean_rows.append({
+            'method_id':mid,
+            'mean_clean_nc':float(np.mean([x['clean_watermark_metrics']['nc'] for x in native])),
+            'mean_clean_ber':float(np.mean([x['clean_watermark_metrics']['ber'] for x in native])),
+            'clean_trial_count':len(native),
+        })
+    dump(output/'table10_clean_control_diagnostic.csv', clean_rows,
+         ['method_id','mean_clean_nc','mean_clean_ber','clean_trial_count'])
+
 
     if 'dct_qr_theory' not in by_method:
         raise ValueError('Table 6 requires dct_qr_theory in the benchmark methods')
@@ -136,7 +154,7 @@ def write_report(base: Path, output: Path):
     fig, ax = plt.subplots(figsize=(12.0, 5.0))
     x = np.arange(len(moderate))
     markers = ('o','s','^','D','v','x','P','*')
-    for i, mid in enumerate(sorted(by_method)):
+    for i, mid in enumerate(table_order):
         means = [np.mean([r['attacked_nc'] for r in by_method_attack[(mid,a.attack_id)]]) for a in moderate]
         ax.plot(x,means,marker=markers[i%len(markers)],lw=1.25,ms=3.5,label=method_names[mid])
     ax.set_xticks(x, [family(a.attack_id).replace('_',' ') for a in moderate], rotation=65, ha='right')
@@ -153,12 +171,13 @@ def write_report(base: Path, output: Path):
          'protocol_id':manifest['protocol']['protocol_id'],
          'fingerprint':manifest['experiment_fingerprint'],
          'attack_suite':manifest['protocol']['attack_suite'],
-         'methods':sorted(by_method),
+         'methods':table_order,
          'host_count':len(manifest['hosts']),
          'watermark_count':len(manifest['watermark_files']),
          'seeds':manifest['protocol']['seeds'],
          'validated_trial_count':len(trials),
-         'fig5_source':'exactly the moderate attack rows in table6_by_attack_severity.csv',
+         'fig5_source':'same complete validated trial records, moderate severity only',
+         'dct2019_disclosure':'64x64 adapted DCT implementation, key-assisted selected-block coordinates; not an exact 2019 reproduction',
     },indent=2)+'\n')
     print(f'Exported to {output}; {len(trials)} validated trials')
 

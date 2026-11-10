@@ -435,6 +435,54 @@ BASELINE_METADATA = {'dct_dm_qim_chen2001_blind': {'canonical_id': 'dct_dm_qim_c
                                               'note': '64x64 Y-channel fixed-QIM adapter; not an exact Zhu 2021 '
                                                       'reproduction.'}}}
 
+# New references are explicitly labeled as common-payload adaptations.
+BASELINE_METADATA.update({
+    "qr_nha2022_blind": {
+        "canonical_id": "qr_nha2022_blind",
+        "native_id": "nha_qr2022", "domain": "qr", "algorithm": "improved_qr_r11_qim",
+        "citation": "Nha et al. 2022, Soft Computing, DOI 10.1007/s00500-022-06975-3",
+        "display_name": "Nha et al. 2022 | Improved QR | Blind (64x64 adapter)",
+        "blindness_tier": "blind", "engine": "class",
+        "fidelity_tier": "paper_core_4x4_qr_with_fourfold_payload_adapter",
+        "requires_original_host": False, "common_4096_payload": True,
+        "primary_blind_eligible": True,
+        "disclosure": {
+            "paper_reproduction_eligible": False,
+            "verified": ["4x4 blue-channel blocks", "r11 first column norm",
+                         "paper Eqs. 22, 23, 25", "Arnold permutation"],
+            "adapted": ["64x64 instead of original 32x32 watermark",
+                        "four placements per bit on 128x128 block grid; majority decoding",
+                        "positive-norm and zero-column guard"],
+            "reference_doi": "10.1007/s00500-022-06975-3",
+        },
+    },
+    "dct_adaptive_ariatmanto2019_keyassisted": {
+        "canonical_id": "dct_adaptive_ariatmanto2019_keyassisted",
+        "native_id": "ariatmanto_dct2019", "domain": "dct",
+        "algorithm": "adaptive_five_midband_dct",
+        "citation": "Ariatmanto and Ernawan 2019/2020, DOI 10.1007/s11042-019-08338-x",
+        "display_name": "Ariatmanto et al. | Adaptive DCT | Key-assisted 64x64 adapter",
+        "blindness_tier": "key_assisted_blind", "engine": "class",
+        "fidelity_tier": "published_conditional_coefficient_rules_with_payload_adapter",
+        "requires_original_host": False, "common_4096_payload": True,
+        "primary_blind_eligible": False,
+        "disclosure": {
+            "paper_reproduction_eligible": False,
+            "verified": ["8x8 DCT", "five printed midband coordinates",
+                         "lowest-variance block selection", "paper Eqs. 4, 6, 8",
+                         "paper Rule 2 and extraction inequality", "Arnold scrambling"],
+            "adapted": ["64x64 instead of original 32x32 watermark",
+                        "one payload bit per coefficient, five per selected block",
+                        "BT.601 luma with equal RGB delta for color hosts",
+                        "image-dependent variance-ranked block coordinates stored as key",
+                        "minimum-magnitude constraint for C(i)>Ry(i) detector (adapt mode)"],
+            "limitations": ["Paper bit-index increment is ambiguous; fixed-slot adapter",
+                            "Original conditional rules do not guarantee clean extraction; common adapter uses disclosed margin correction"],
+            "reference_doi": "10.1007/s11042-019-08338-x",
+        },
+    },
+})
+
 NATIVE_TO_CANONICAL = {row["native_id"]: canonical for canonical, row in BASELINE_METADATA.items()}
 
 def baseline_metadata(canonical_id: str) -> dict:
