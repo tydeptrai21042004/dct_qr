@@ -357,7 +357,58 @@ REVIEWER_STRENGTH = (
 REVIEWER_GEOMETRIC = tuple(a for a in REVIEWER_STRENGTH if a.category.startswith('geometric'))
 REVIEWER_SECURITY_ATTACKS = tuple(a for a in REVIEWER_STRENGTH if a.category == 'intentional_removal')
 
+# Revision-specific, fully enumerated 20 families x 3 levels.
+# Deliberately independent of COMMON_20 / PUBLICATION / LEGACY_* so historical
+# tables can still be reproduced using their original protocols.
+def _revision_20x3_gaussian(mode: str) -> tuple[AttackConfig, ...]:
+    if mode not in ('sigma', 'variance'):
+        raise ValueError(mode)
+    levels = ('mild', 'moderate', 'strong')
+    rows = (
+        ('jpeg', 'jpeg', ({'quality': 90}, {'quality': 70}, {'quality': 50}), 'compression'),
+        ('jpeg2000', 'jpeg2000', ({'quality_layer': 3.0, 'strict': True}, {'quality_layer': 7.0, 'strict': True}, {'quality_layer': 10.0, 'strict': True}), 'compression'),
+        ('bit_depth', 'bit_depth', ({'bits': 7}, {'bits': 6}, {'bits': 5}), 'compression'),
+        ('color_quantization', 'color_quantization', ({'colors': 128}, {'colors': 64}, {'colors': 32}), 'compression'),
+        ('salt_pepper', 'salt_pepper', ({'amount': 0.001, 'seed': 123}, {'amount': 0.005, 'seed': 123}, {'amount': 0.01, 'seed': 123}), 'noise'),
+        ('speckle', 'speckle_noise', ({'variance': 0.001, 'seed': 123}, {'variance': 0.005, 'seed': 123}, {'variance': 0.01, 'seed': 123}), 'noise'),
+        ('poisson', 'poisson_noise', ({'peak': 255.0, 'seed': 123}, {'peak': 128.0, 'seed': 123}, {'peak': 64.0, 'seed': 123}), 'noise'),
+        ('median', 'median_filter', ({'size': 3}, {'size': 5}, {'size': 7}), 'filtering'),
+        ('average', 'average_filter', ({'size': 3}, {'size': 5}, {'size': 7}), 'filtering'),
+        ('gaussian_blur', 'gaussian_blur', ({'radius': 0.5}, {'radius': 1.0}, {'radius': 1.5}), 'filtering'),
+        ('sharpen', 'sharpen', ({'factor': 1.25}, {'factor': 1.5}, {'factor': 2.0}), 'filtering'),
+        # Rotation ONCE, original-size canvas. Never rotation_back.
+        ('rotation', 'rotation', ({'degrees': 5.0}, {'degrees': 10.0}, {'degrees': 15.0}), 'geometric'),
+        ('resize', 'resize', ({'factor': 0.9}, {'factor': 0.75}, {'factor': 0.5}), 'geometric'),
+        # Crop alone (pixels outside retained central region removed, zero canvas), NO resize.
+        ('crop_zero_pad', 'crop_zero_pad', ({'keep': 0.95}, {'keep': 0.90}, {'keep': 0.80}), 'geometric'),
+        ('translation', 'translation', ({'shift_x': 2, 'shift_y': 2}, {'shift_x': 4, 'shift_y': 4}, {'shift_x': 8, 'shift_y': 8}), 'geometric'),
+        ('brightness', 'brightness', ({'factor': 0.95}, {'factor': 0.90}, {'factor': 0.80}), 'photometric'),
+        ('contrast', 'contrast', ({'factor': 0.95}, {'factor': 0.90}, {'factor': 0.80}), 'photometric'),
+        ('gamma', 'gamma', ({'gamma': 1.05}, {'gamma': 1.20}, {'gamma': 1.50}), 'photometric'),
+        ('saturation', 'saturation', ({'factor': 0.80}, {'factor': 0.50}, {'factor': 0.20}), 'photometric'),
+    )
+    if mode == 'sigma':
+        gaussian = ('gaussian', 'gaussian_noise',
+                    ({'sigma': 1.0, 'seed': 123}, {'sigma': 3.0, 'seed': 123}, {'sigma': 5.0, 'seed': 123}), 'noise')
+    else:
+        gaussian = ('gaussian', 'gaussian_noise_var',
+                    ({'variance': 0.001, 'seed': 123}, {'variance': 0.003, 'seed': 123}, {'variance': 0.005, 'seed': 123}), 'noise')
+    rows = rows[:4] + (gaussian,) + rows[4:]
+    attacks = tuple(
+        _a(f'revision_{mode}__{family}__{severity}', group, dict(params[i]), category, severity)
+        for family, group, params, category in rows
+        for i, severity in enumerate(levels)
+    )
+    assert len(attacks) == 60 and len({a.attack_id for a in attacks}) == 60
+    return attacks
+
+
+REVISION_20X3_SIGMA = _revision_20x3_gaussian('sigma')
+REVISION_20X3_VARIANCE = _revision_20x3_gaussian('variance')
+
 ATTACK_SUITES = {
+    "revision_20x3_sigma": REVISION_20X3_SIGMA,
+    "revision_20x3_variance": REVISION_20X3_VARIANCE,
     "sanity": SANITY,
     "compression": COMPRESSION,
     "noise": NOISE,

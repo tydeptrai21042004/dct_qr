@@ -41,7 +41,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Numerical illustrations for the DCT-QR theory proposal."
     )
-    parser.add_argument("--host", type=Path, default=ROOT / "data" / "host" / "lenna.bmp")
+    parser.add_argument("--host", type=Path, default=ROOT / "data" / "host" / "pepper.bmp")
     parser.add_argument("--watermark", type=Path, default=ROOT / "data" / "watermark" / "wm.png")
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "dct_qr_theory_after_abc.json")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "results" / "dct_qr_theory_numerics")

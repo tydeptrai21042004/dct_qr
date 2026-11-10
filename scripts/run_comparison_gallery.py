@@ -24,7 +24,7 @@ from run_reviewer_diagnostics import dump
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--methods',default='dct_qr_theory,dct_dm_qim_chen2001_blind')
-    p.add_argument('--host',type=Path,default=ROOT/'data/host/lenna.bmp')
+    p.add_argument('--host',type=Path,default=ROOT/'data/host/pepper.bmp')
     p.add_argument('--watermark',type=Path,default=ROOT/'data/watermark/wm.png')
     p.add_argument('--suite',default='common20')
     p.add_argument('--attack-limit',type=int,default=6)

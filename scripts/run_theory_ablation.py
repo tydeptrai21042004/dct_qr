@@ -13,7 +13,7 @@ from qr64_certified.common.metrics import psnr, ssim, nc, ber
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--host', type=Path, default=ROOT/'data/host/lenna.bmp')
+    parser.add_argument('--host', type=Path, default=ROOT/'data/host/pepper.bmp')
     parser.add_argument('--watermark', type=Path, default=ROOT/'data/watermark/wm.png')
     parser.add_argument('--config',type=Path,default=ROOT/'configs/dct_qr_theory_after_abc.json')
     parser.add_argument('--attack-suite',default='common20')

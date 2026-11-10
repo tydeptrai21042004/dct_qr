@@ -13,9 +13,16 @@ def _alpha_composite_rgba_on_white(img: Image.Image) -> Image.Image:
     return Image.alpha_composite(bg, rgba).convert("RGB")
 
 
+def _excluded_host(path: str | Path) -> bool:
+    """Disallow Lena/Lenna as an experimental host for this revision."""
+    return Path(path).stem.casefold() in {"lena", "lenna"}
+
+
 def load_host_rgb(path: str | Path, size: int = HOST_SIZE) -> np.ndarray:
-    """Load a host image as exact 24-bit RGB uint8 with the expected size."""
+    """Load an allowed host image as exact 24-bit RGB uint8."""
     path = Path(path)
+    if _excluded_host(path):
+        raise ValueError(f"Excluded host image (Lena/Lenna): {path}")
     img = Image.open(path)
     if img.mode == "RGBA":
         img = _alpha_composite_rgba_on_white(img)
@@ -63,4 +70,6 @@ def save_image(path: str | Path, arr: np.ndarray) -> None:
 def list_image_files(folder: str | Path) -> list[Path]:
     folder = Path(folder)
     exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
-    return sorted([p for p in folder.iterdir() if p.suffix.lower() in exts])
+    return sorted([p for p in folder.iterdir()
+                   if p.is_file() and p.suffix.lower() in exts
+                   and not _excluded_host(p)])

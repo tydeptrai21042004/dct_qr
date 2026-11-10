@@ -1,0 +1,38 @@
+{
+  "protocol_id": "dctqr_revision20x3_sigma_2026_11_v1",
+  "host_dir": "data/host",
+  "host_files": [
+    "airplane.bmp",
+    "athens.bmp",
+    "baboon.bmp",
+    "butfly.bmp",
+    "Girl.bmp",
+    "house.bmp",
+    "manhatan.bmp",
+    "milkdrop.bmp",
+    "pepper.bmp",
+    "safari.bmp",
+    "sailboat.bmp",
+    "tiffany.bmp"
+  ],
+  "watermarks": [
+    "data/watermark/wm.png",
+    "data/watermark/Cc.logo.circle.png"
+  ],
+  "seeds": [
+    2026
+  ],
+  "attack_suite": "revision_20x3_sigma",
+  "methods": [
+    "dct_qr_theory",
+    "dwt_qr_fa_guo2017_keyassisted",
+    "hessenberg_nha2023_blind",
+    "dct_dm_qim_chen2001_blind"
+  ],
+  "output_dir": "results/revision_20x3",
+  "continue_on_error": true,
+  "resume": true,
+  "strict_clean_proposals": true,
+  "host_limit": null,
+  "attack_limit": null
+}

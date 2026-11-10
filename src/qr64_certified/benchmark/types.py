@@ -37,6 +37,7 @@ class BaselineRunParameters:
 class BenchmarkProtocol:
     protocol_id: str = "quick_unified_v1"
     host_dir: str = "data/host"
+    host_files: tuple[str, ...] | None = None
     watermarks: tuple[str, ...] = ("data/watermark/wm.png",)
     seeds: tuple[int, ...] = (2026,)
     attack_suite: str = "sanity"
@@ -53,6 +54,8 @@ class BenchmarkProtocol:
         raw = dict(value)
         if "watermark" in raw and "watermarks" not in raw:
             raw["watermarks"] = [raw.pop("watermark")]
+        if "host_files" in raw and raw["host_files"] is not None:
+            raw["host_files"] = tuple(str(v) for v in raw["host_files"])
         if "watermarks" in raw:
             raw["watermarks"] = tuple(str(v) for v in raw["watermarks"])
         if "seeds" in raw:
@@ -70,6 +73,8 @@ class BenchmarkProtocol:
     def validate(self) -> None:
         if not self.protocol_id.strip():
             raise ValueError("protocol_id cannot be empty")
+        if self.host_files is not None and (not self.host_files or len(set(self.host_files)) != len(self.host_files)):
+            raise ValueError("host_files must contain unique nonempty filenames")
         if not self.watermarks:
             raise ValueError("At least one watermark is required")
         if not self.seeds:

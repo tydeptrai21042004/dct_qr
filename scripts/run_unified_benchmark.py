@@ -215,6 +215,12 @@ def main() -> None:
 
     host_dir = protocol.resolve_path(ROOT, protocol.host_dir)
     hosts = list_image_files(host_dir)
+    if protocol.host_files is not None:
+        available = {p.name: p for p in hosts}
+        missing_host_names = [name for name in protocol.host_files if name not in available]
+        if missing_host_names:
+            parser.error(f"Missing required host files: {missing_host_names}")
+        hosts = [available[name] for name in protocol.host_files]
     if protocol.host_limit is not None:
         hosts = hosts[: protocol.host_limit]
     if not hosts:

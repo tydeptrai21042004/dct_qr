@@ -32,7 +32,7 @@ def jpeg(image: Array, quality: int = 70, **kwargs) -> Array:
     return np.asarray(Image.open(buf).convert("RGB"), dtype=np.uint8)
 
 
-def jpeg2000(image: Array, quality_layer: float = 7.0, quality: int | None = None, **kwargs) -> Array:
+def jpeg2000(image: Array, quality_layer: float = 7.0, quality: int | None = None, strict: bool = False, **kwargs) -> Array:
     """JPEG2000 compression attack.
 
     Pillow support for JPEG2000 varies by environment. When JP2 cannot be
@@ -48,7 +48,9 @@ def jpeg2000(image: Array, quality_layer: float = 7.0, quality: int | None = Non
         )
         buf.seek(0)
         return np.asarray(Image.open(buf).convert("RGB"), dtype=np.uint8)
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise RuntimeError("JPEG2000 codec failed; no JPEG substitute is allowed in the revision benchmark") from exc
         q = int(quality) if quality is not None else int(np.clip(100 - 8 * float(quality_layer), 10, 95))
         return jpeg(image, quality=q)
 
@@ -202,6 +204,45 @@ def resize_attack(image: Array, factor: float = 0.5, **kwargs) -> Array:
         Image.Resampling.BICUBIC,
     )
     return np.asarray(small.resize((w, h), Image.Resampling.BICUBIC), dtype=np.uint8)
+
+
+def crop_zero_pad(image: Array, keep: float = 0.9, fill: int = 0, **kwargs) -> Array:
+    """Center-crop content WITHOUT resizing or interpolation.
+
+    To remain compatible with existing fixed-HxW watermark extractors, return an
+    original-size canvas and set pixels outside the retained center rectangle
+    to ``fill``. This is a *center crop with blank padding*, NOT a standalone
+    smaller cropped image and NOT crop-and-resize. Label it accordingly in plots.
+    """
+    img = _u8(image)
+    h, w = img.shape[:2]
+    keep = float(keep)
+    if not (0.0 < keep <= 1.0):
+        raise ValueError('keep must be in (0, 1]')
+    ch = max(1, int(round(h * keep)))
+    cw = max(1, int(round(w * keep)))
+    y0, x0 = (h - ch) // 2, (w - cw) // 2
+    out = np.full_like(img, int(np.clip(fill, 0, 255)))
+    out[y0:y0 + ch, x0:x0 + cw] = img[y0:y0 + ch, x0:x0 + cw]
+    return out
+
+
+def true_crop_only(image: Array, keep: float = 0.9, **kwargs) -> Array:
+    """Actual crop, with smaller HxW and no postprocessing.
+
+    This is deliberately NOT registered in the current fixed-size benchmark:
+    all current image-quality metrics and some decoders assume equal shape.
+    Expose it for future explicit variable-image-size crop evaluation.
+    """
+    img = _u8(image)
+    h, w = img.shape[:2]
+    keep = float(keep)
+    if not (0.0 < keep <= 1.0):
+        raise ValueError('keep must be in (0, 1]')
+    ch = max(1, int(round(h * keep)))
+    cw = max(1, int(round(w * keep)))
+    y0, x0 = (h - ch) // 2, (w - cw) // 2
+    return img[y0:y0 + ch, x0:x0 + cw].copy()
 
 
 def crop_resize(image: Array, keep: float = 0.9, seed: int | None = None, random_crop: bool = False, **kwargs) -> Array:
@@ -819,6 +860,7 @@ _ATTACK_FUNCS: dict[str, Callable[..., Array]] = {
     "carrier_bandstop": carrier_bandstop,
     "resize": resize_attack,
     "crop_resize": crop_resize,
+    "crop_zero_pad": crop_zero_pad,
     "occlusion": occlusion,
     "occlusion_fraction": occlusion_fraction,
     "gamma": gamma_correction,
